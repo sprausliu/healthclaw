@@ -1,0 +1,5 @@
+[
+  {"type":"steps","timestamp":"2026-02-19T09:00:00Z","data":{"count":1200}},
+  {"type":"heart-rate","timestamp":"2026-02-19T09:01:00Z","data":{"bpm":76}},
+  {"type":"sleep","timestamp":"2026-02-19T02:00:00Z","data":{"durationMinutes":420}}
+]

@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.env
+webhook-server.log
+webhook-server.error.log
+
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.tmp
+data/backups/*.jsonl
+data/backups/*.gz
+
+# Legacy runtime artifacts (pre-persistence refactor)
+config.json
+data/
+*.jsonl
+
+# Migration state files
+migration-state.json

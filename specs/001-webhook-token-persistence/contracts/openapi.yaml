@@ -1,0 +1,174 @@
+openapi: 3.0.3
+info:
+  title: HealthClaw Webhook Sync API (Persistence Refactor)
+  version: 1.0.0
+  description: |
+    Contract-focused view for webhook sync/auth behavior during token persistence refactor.
+    Public sync API behavior remains backward compatible; persistence changes are server-internal.
+
+    ## Persistence Changes (Internal)
+
+    The following changes are internal to the server and do not affect API contracts:
+
+    - **Token Storage**: Permanent device tokens now stored in OS keychain or secure file backend
+    - **Config Location**: Runtime configuration moved from repository to user-level app data directory
+    - **Path Resolution**: All runtime paths now resolved independently of working directory
+    - **Migration**: Legacy tokens automatically migrated on first startup (one-time, idempotent)
+
+    ## Authentication Behavior
+
+    Both `/api/health-sync` and `/api/health-sync/batch` use identical authentication:
+
+    - Client sends `X-API-Token` header with permanent device token
+    - Server loads token from secure secret backend
+    - Constant-time comparison validates the token
+    - On success: 200 with sync result
+    - On failure: 401 with generic error (no secret internals exposed)
+
+    ### Safe Failure Handling
+
+    If secret backend is temporarily unavailable:
+    - Authentication returns 401 Unauthorized
+    - Error message is generic ("Invalid or expired token")
+    - Server logs contain diagnostic details (for operator troubleshooting)
+    - No secret paths, backend types, or partial tokens exposed in response
+
+    This ensures credential storage failures appear as normal auth failures to clients.
+servers:
+  - url: http://localhost:3000
+paths:
+  /api/health-sync:
+    post:
+      summary: Ingest a single health record
+      security:
+        - ApiTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealthRecord'
+      responses:
+        '200':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  status:
+                    type: string
+                  type:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+                required: [success, status]
+        '400':
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing/invalid token or token lookup unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/health-sync/batch:
+    post:
+      summary: Ingest batch health records
+      security:
+        - ApiTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clientRequestId:
+                  type: string
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: '#/components/schemas/HealthRecord'
+              required: [items]
+      responses:
+        '200':
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  total:
+                    type: integer
+                  inserted:
+                    type: integer
+                  duplicates:
+                    type: integer
+                  failed:
+                    type: integer
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:
+                          type: integer
+                        code:
+                          type: string
+                        message:
+                          type: string
+                required: [success, total, inserted, duplicates, failed, errors]
+        '400':
+          description: Invalid batch payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing/invalid token or token lookup unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  securitySchemes:
+    ApiTokenHeader:
+      type: apiKey
+      in: header
+      name: x-api-token
+  schemas:
+    HealthRecord:
+      type: object
+      properties:
+        type:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        data:
+          type: object
+          additionalProperties: true
+        category:
+          type: string
+        source:
+          type: object
+          additionalProperties: true
+      required: [type, timestamp, data]
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+      required: [error]

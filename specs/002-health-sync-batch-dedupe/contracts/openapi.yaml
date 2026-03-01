@@ -1,0 +1,238 @@
+openapi: 3.0.3
+info:
+  title: HealthClaw Webhook API - Batch/Dedupe/Cleanup
+  version: 0.2.0
+servers:
+  - url: https://{host}
+    variables:
+      host:
+        default: qashier-cr-ai-pro.taild7af93.ts.net
+paths:
+  /api/health-sync:
+    post:
+      summary: Ingest a single health record (idempotent)
+      security:
+        - DeviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealthRecord'
+      responses:
+        '200':
+          description: Processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleSyncResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+
+  /api/health-sync/batch:
+    post:
+      summary: Ingest a batch of health records
+      security:
+        - DeviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items:
+                    $ref: '#/components/schemas/HealthRecord'
+                clientRequestId:
+                  type: string
+      responses:
+        '200':
+          description: Batch processed (partial success possible)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSyncResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+
+  /admin/cleanup/preview:
+    post:
+      summary: Preview cleanup impact without mutating data
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CleanupRequest'
+      responses:
+        '200':
+          description: Cleanup preview result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CleanupResult'
+        '401':
+          description: Unauthorized
+
+  /admin/cleanup/execute:
+    post:
+      summary: Execute cleanup operation (destructive)
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CleanupRequest'
+                - type: object
+                  required: [confirm]
+                  properties:
+                    confirm:
+                      type: boolean
+                      enum: [true]
+      responses:
+        '200':
+          description: Cleanup execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CleanupResult'
+        '400':
+          description: Missing confirmation or invalid criteria
+        '401':
+          description: Unauthorized
+
+components:
+  securitySchemes:
+    DeviceToken:
+      type: apiKey
+      in: header
+      name: X-API-Token
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+
+  schemas:
+    HealthRecord:
+      type: object
+      required: [type, timestamp, data]
+      properties:
+        type:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        category:
+          type: string
+        source:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+        data:
+          type: object
+          additionalProperties: true
+
+    SingleSyncResponse:
+      type: object
+      required: [success, status, type, timestamp]
+      properties:
+        success:
+          type: boolean
+        status:
+          type: string
+          enum: [inserted, duplicate]
+        type:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    BatchSyncResponse:
+      type: object
+      required: [success, total, inserted, duplicates, failed, errors]
+      properties:
+        success:
+          type: boolean
+        total:
+          type: integer
+        inserted:
+          type: integer
+        duplicates:
+          type: integer
+        failed:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: object
+            required: [index, code, message]
+            properties:
+              index:
+                type: integer
+              code:
+                type: string
+              message:
+                type: string
+
+    CleanupRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [duplicates-only, before-date, by-type, compound]
+        filters:
+          type: object
+          properties:
+            beforeTimestamp:
+              type: string
+              format: date-time
+            types:
+              type: array
+              items:
+                type: string
+            categories:
+              type: array
+              items:
+                type: string
+        dryRun:
+          type: boolean
+          default: false
+
+    CleanupResult:
+      type: object
+      required: [preview, matched, removed, kept, failed, byType]
+      properties:
+        preview:
+          type: boolean
+        matched:
+          type: integer
+        removed:
+          type: integer
+        kept:
+          type: integer
+        failed:
+          type: integer
+        backupPath:
+          type: string
+          nullable: true
+        byType:
+          type: object
+          additionalProperties:
+            type: integer
