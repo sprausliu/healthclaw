@@ -16,6 +16,12 @@ export interface Paths {
   readonly migrationStatePath: string
   readonly secretFilePath: string
   readonly legacyConfigPath: string
+  readonly userRegistryFile: string
+}
+
+export interface UserPaths {
+  readonly healthDataFile: string
+  readonly dedupeDbPath: string
 }
 
 export class PathResolver {
@@ -75,6 +81,18 @@ export class PathResolver {
     return path.join(this.repoRoot, 'config.json')
   }
 
+  getUserRegistryFilePath(): string {
+    return path.join(this.getAppDataRoot(), 'user-registry.json')
+  }
+
+  getUserPaths(userId: string): UserPaths {
+    const userDir = path.join(this.getAppDataRoot(), 'users', userId)
+    return {
+      healthDataFile: path.join(userDir, 'health-data.jsonl'),
+      dedupeDbPath: path.join(userDir, 'dedupe.db'),
+    }
+  }
+
   async ensureDirectories(): Promise<void> {
     const appDataRoot = this.getAppDataRoot()
 
@@ -110,6 +128,7 @@ export class PathResolver {
       migrationStatePath: this.getMigrationStatePath(),
       secretFilePath: this.getSecretFilePath(),
       legacyConfigPath: this.getLegacyConfigPath(),
+      userRegistryFile: this.getUserRegistryFilePath(),
     }
   }
 }

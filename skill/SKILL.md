@@ -180,6 +180,71 @@ Common types: `HeartRate`, `RestingHeartRate`, `HeartRateVariabilitySDNN`,
 
 ---
 
+## Multi-User Setup
+
+By default, the server runs in single-user (legacy) mode. To support multiple users
+(e.g. family members, clients), create users via the Admin API. Each user gets an
+isolated data directory — no data mixing between users.
+
+### Create a user
+
+```bash
+curl -X POST https://your-public-url/admin/users \
+  -H "Content-Type: application/json" \
+  -H "x-admin-token: your-secret" \
+  -d '{"name": "alice"}'
+```
+
+Response (token is shown **once only** — save it):
+```json
+{
+  "userId": "usr_a1b2c3d4",
+  "token": "64-char-hex-token...",
+  "name": "alice",
+  "createdAt": "2026-03-14T12:00:00.000Z"
+}
+```
+
+### List users
+
+```bash
+curl https://your-public-url/admin/users \
+  -H "x-admin-token: your-secret"
+```
+
+Returns `[{ userId, name, createdAt }]` — tokens are never included in list responses.
+
+### Using the token
+
+The returned token is the API key the iOS app uses for syncing. Set it as the
+`x-api-token` header when pairing or syncing. Each user's data is automatically
+routed to their own directory:
+
+```
+{appDataRoot}/users/{userId}/health-data.jsonl
+{appDataRoot}/users/{userId}/dedupe.db
+```
+
+### Legacy compatibility
+
+The existing single-device permanent token continues to work. Its data stays at the
+original path (`{appDataRoot}/health-data.jsonl`). No migration is needed — both
+modes work side by side.
+
+### Reading per-user data (OpenClaw skill integration)
+
+When querying health data for a specific user, read from their per-user path:
+
+```bash
+# Single (legacy) user — default path
+cat ~/Library/Application\ Support/healthclaw-webhook/health-data.jsonl
+
+# Multi-user — per-user path
+cat ~/Library/Application\ Support/healthclaw-webhook/users/usr_a1b2c3d4/health-data.jsonl
+```
+
+---
+
 ## API Reference
 
 Full API spec: [`webhook-server/docs/API_SPEC.md`](../webhook-server/docs/API_SPEC.md)
@@ -190,4 +255,6 @@ Key endpoints:
 - `POST /api/pair?token=<token>` — complete device pairing (called by iOS app)
 - `POST /api/health-sync` — ingest a single record
 - `POST /api/health-sync/batch` — ingest up to 5000 records in one request
+- `POST /admin/users` — create a new user (returns token once)
+- `GET  /admin/users` — list all users (no tokens)
 - `GET  /admin/device-info` — check paired device metadata

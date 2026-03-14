@@ -1,15 +1,18 @@
 import 'dotenv/config'
-import express, { type Request, type Response, type NextFunction, type Express } from 'express'
+import express, { type Request, type Response, type Express } from 'express'
 import bodyParser from 'body-parser'
 import { randomBytes } from 'crypto'
 import { createDedupeRepository, type DedupeRepository } from './dedupe/dedupe-repository'
 import { appendRecord } from './storage/health-log-store'
-import { createIngestService } from './services/ingest-service'
-import { createBatchSyncService } from './services/batch-sync-service'
+import { createIngestService, type IngestService } from './services/ingest-service'
+import { createBatchSyncService, type BatchSyncService } from './services/batch-sync-service'
 import { buildBatchSyncResponse } from './contracts/batch-sync-response'
 import { createBatchGuardrails } from './middleware/batch-guardrails'
 import { authenticateAdmin } from './middleware/auth-admin'
 import { validate } from './middleware/validate'
+import { createResolveUser } from './middleware/resolve-user'
+import { createUserRegistry } from './persistence/user-registry'
+import { createAdminUsersRouter } from './routes/admin-users'
 import {
   HealthSyncBodySchema,
   BatchSyncBodySchema,
@@ -71,7 +74,7 @@ export const createApp = async (options: CreateAppOptions = {}): Promise<AppWith
 
   const persistence: PersistenceContext = await bootstrap(bootstrapOpts)
 
-  const { paths, runtimeConfig, secretStore } = persistence
+  const { paths, runtimeConfig, secretStore, pathResolver } = persistence
   const credentialService: CredentialService = createCredentialService(secretStore)
 
   // Log startup diagnostics
@@ -118,10 +121,42 @@ export const createApp = async (options: CreateAppOptions = {}): Promise<AppWith
   const ingestService = createIngestService({
     dedupeRepository,
     logStorePath: HEALTH_DATA_FILE,
-    appendRecord: (path: string, record: unknown) =>
-      appendRecord(path, record as Readonly<Record<string, unknown>>),
+    appendRecord: (p: string, record: unknown) =>
+      appendRecord(p, record as Readonly<Record<string, unknown>>),
   })
   const batchSyncService = createBatchSyncService({ ingestService })
+
+  // Multi-user support
+  const userRegistry = createUserRegistry(paths.userRegistryFile)
+  const userDedupeCache = new Map<string, DedupeRepository>()
+
+  const getServicesForRequest = async (
+    req: Request
+  ): Promise<{ ingest: IngestService; batch: BatchSyncService }> => {
+    const userId = req.user?.id
+    if (!userId) {
+      return { ingest: ingestService, batch: batchSyncService }
+    }
+
+    const userPaths = pathResolver.getUserPaths(userId)
+    let userDedupeRepo = userDedupeCache.get(userId)
+    if (!userDedupeRepo) {
+      userDedupeRepo = createDedupeRepository(userPaths.dedupeDbPath)
+      await userDedupeRepo.init()
+      userDedupeCache.set(userId, userDedupeRepo)
+    }
+
+    const userIngest = createIngestService({
+      dedupeRepository: userDedupeRepo,
+      logStorePath: userPaths.healthDataFile,
+      appendRecord: (p: string, record: unknown) =>
+        appendRecord(p, record as Readonly<Record<string, unknown>>),
+    })
+
+    return { ingest: userIngest, batch: createBatchSyncService({ ingestService: userIngest }) }
+  }
+
+  const resolveUser = createResolveUser({ userRegistry, credentialService })
 
   app.use(bodyParser.json({ limit: `${BATCH_MAX_BODY_MB}mb` }))
 
@@ -142,31 +177,6 @@ export const createApp = async (options: CreateAppOptions = {}): Promise<AppWith
     const deepLink = `healthclaw://pair?url=${encodeURIComponent(baseUrl)}&token=${token}`
     const openUrl = `${baseUrl}/pair/open?token=${encodeURIComponent(token)}`
     return { baseUrl, deepLink, openUrl }
-  }
-
-  const authenticatePermanent = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    const token = req.headers['x-api-token'] as string | undefined
-    if (!token) {
-      res.status(401).json({ error: 'Missing API token' })
-      return
-    }
-
-    try {
-      const isValid = await credentialService.verifyToken(token)
-      if (!isValid) {
-        res.status(401).json({ error: 'Invalid or expired token' })
-        return
-      }
-      next()
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      logError('Token verification failed', { component: 'auth', error: message })
-      res.status(500).json({ error: 'Authentication system error' })
-    }
   }
 
   app.get('/health', async (_req: Request, res: Response) => {
@@ -307,10 +317,11 @@ export const createApp = async (options: CreateAppOptions = {}): Promise<AppWith
 
   app.post(
     '/api/health-sync',
-    authenticatePermanent,
+    resolveUser,
     validate(HealthSyncBodySchema),
     async (req: Request, res: Response) => {
-      const result = await ingestService.ingest(req.body)
+      const services = await getServicesForRequest(req)
+      const result = await services.ingest.ingest(req.body)
       if (result.status === 'failed') {
         res.status(400).json({ error: result.message, code: result.code })
         return
@@ -326,7 +337,7 @@ export const createApp = async (options: CreateAppOptions = {}): Promise<AppWith
 
   app.post(
     '/api/health-sync/batch',
-    authenticatePermanent,
+    resolveUser,
     validate(BatchSyncBodySchema),
     createBatchGuardrails({
       maxItems: BATCH_MAX_ITEMS,
@@ -334,10 +345,12 @@ export const createApp = async (options: CreateAppOptions = {}): Promise<AppWith
     }),
     async (req: Request, res: Response) => {
       const startedAt = Date.now()
-      const summary = await batchSyncService.processBatch(req.body.items ?? [])
+      const services = await getServicesForRequest(req)
+      const summary = await services.batch.processBatch(req.body.items ?? [])
 
       info('Batch sync completed', {
         component: 'batch-sync',
+        userId: req.user?.id ?? 'legacy',
         clientRequestId: req.body.clientRequestId ?? null,
         total: summary.total,
         inserted: summary.inserted,
@@ -349,6 +362,8 @@ export const createApp = async (options: CreateAppOptions = {}): Promise<AppWith
       res.json(buildBatchSyncResponse(summary))
     }
   )
+
+  app.use('/admin', createAdminUsersRouter(userRegistry))
 
   app.post('/admin/cleanup/preview', authenticateAdmin, async (req: Request, res: Response) => {
     try {
