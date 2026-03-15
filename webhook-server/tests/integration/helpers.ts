@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Express } from 'express';
 import { createApp } from '../../src/index.js';
+import { resetBootstrap } from '../../src/persistence/persistence-bootstrap.js';
 
 export interface TestPaths {
   healthDataFile: string;
@@ -28,17 +29,21 @@ export interface TestServer {
   request: RequestFunction;
   close: () => Promise<void>;
   paths: TestPaths;
+  dataDir: string;
 }
 
 /**
  * Create a test server with isolated temporary data directory
  */
 export async function createTestServer(): Promise<TestServer> {
+  resetBootstrap();
+
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'healthclaw-'));
 
   const app = await createApp({
     dataDir: root,
     repoRoot: root,
+    secretBackend: 'file',
   });
   const { dedupeRepository, paths } = app.locals;
 
@@ -83,6 +88,7 @@ export async function createTestServer(): Promise<TestServer> {
       configFile: paths.configFile,
       dedupeDbPath: paths.dedupeDbPath,
     },
+    dataDir: root,
   };
 }
 
