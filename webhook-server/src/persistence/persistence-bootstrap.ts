@@ -185,6 +185,11 @@ export const bootstrap = async (options: BootstrapOptions = {}): Promise<Persist
   return await globalBootstrap.initialize(options)
 }
 
+/** Reset the global singleton — used by tests to get isolated bootstrap per test. */
+export const resetBootstrap = (): void => {
+  globalBootstrap = null
+}
+
 export const getBootstrap = (): PersistenceContext => {
   if (!globalBootstrap || !globalBootstrap['initialized']) {
     throw new Error('Persistence not bootstrapped. Call bootstrap() first.')

@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestServer, pairDevice } from './helpers.js';
 
-test('POST /api/health-sync: missing required field returns 400', async () => {
+test('POST /api/health-sync: missing required field returns 400', async (t) => {
   const { request, close } = await createTestServer();
+  t.after(() => close());
   const apiToken = await pairDevice(request);
 
   // Missing 'data' field
@@ -21,14 +22,13 @@ test('POST /api/health-sync: missing required field returns 400', async () => {
   });
 
   assert.equal(res.status, 400);
-  assert.ok(res.body.error);
-  assert.ok(res.body.error.includes('data'));
-
-  await close();
+  assert.ok(res.body.errors);
+  assert.ok(res.body.errors.fieldErrors.data);
 });
 
-test('POST /api/health-sync/batch: missing required field returns 400', async () => {
+test('POST /api/health-sync/batch: missing required field returns 400', async (t) => {
   const { request, close } = await createTestServer();
+  t.after(() => close());
   const apiToken = await pairDevice(request);
 
   // Missing 'items' field
@@ -45,14 +45,13 @@ test('POST /api/health-sync/batch: missing required field returns 400', async ()
   });
 
   assert.equal(res.status, 400);
-  assert.ok(res.body.error);
-  assert.ok(res.body.error.includes('items'));
-
-  await close();
+  assert.ok(res.body.errors);
+  assert.ok(res.body.errors.fieldErrors.items);
 });
 
-test('POST /api/pair: missing deviceInfo returns 200 (optional field)', async () => {
+test('POST /api/pair: missing deviceInfo returns 200 (optional field)', async (t) => {
   const { request, close } = await createTestServer();
+  t.after(() => close());
 
   const generated = await request('/admin/generate-pairing', { method: 'POST' });
   const pairToken = generated.body.pairingToken;
@@ -67,12 +66,11 @@ test('POST /api/pair: missing deviceInfo returns 200 (optional field)', async ()
   assert.equal(res.status, 200);
   assert.ok(res.body.success);
   assert.ok(res.body.permanentToken);
-
-  await close();
 });
 
-test('POST /api/health-sync: invalid timestamp format returns 400', async () => {
+test('POST /api/health-sync: invalid timestamp format returns 400', async (t) => {
   const { request, close } = await createTestServer();
+  t.after(() => close());
   const apiToken = await pairDevice(request);
 
   const res = await request('/api/health-sync', {
@@ -89,14 +87,13 @@ test('POST /api/health-sync: invalid timestamp format returns 400', async () => 
   });
 
   assert.equal(res.status, 400);
-  assert.ok(res.body.error);
-  assert.ok(res.body.error.toLowerCase().includes('timestamp'));
-
-  await close();
+  assert.ok(res.body.errors);
+  assert.ok(res.body.errors.fieldErrors.timestamp);
 });
 
-test('POST /api/health-sync: empty type string returns 400', async () => {
+test('POST /api/health-sync: empty type string returns 400', async (t) => {
   const { request, close } = await createTestServer();
+  t.after(() => close());
   const apiToken = await pairDevice(request);
 
   const res = await request('/api/health-sync', {
@@ -113,13 +110,13 @@ test('POST /api/health-sync: empty type string returns 400', async () => {
   });
 
   assert.equal(res.status, 400);
-  assert.ok(res.body.error);
-
-  await close();
+  assert.ok(res.body.errors);
+  assert.ok(res.body.errors.fieldErrors.type);
 });
 
-test('POST /api/health-sync/batch: empty items array returns 400', async () => {
+test('POST /api/health-sync/batch: empty items array returns 400', async (t) => {
   const { request, close } = await createTestServer();
+  t.after(() => close());
   const apiToken = await pairDevice(request);
 
   const res = await request('/api/health-sync/batch', {
@@ -134,8 +131,6 @@ test('POST /api/health-sync/batch: empty items array returns 400', async () => {
   });
 
   assert.equal(res.status, 400);
-  assert.ok(res.body.error);
-  assert.ok(res.body.error.includes('items'));
-
-  await close();
+  assert.ok(res.body.errors);
+  assert.ok(res.body.errors.fieldErrors.items);
 });
