@@ -46,6 +46,12 @@ const buildCanonicalIdentity = (record: HealthRecord): string => {
 }
 
 export const buildDedupeKey = (record: HealthRecord): string => {
+  // Use client-provided stable key when available
+  const data = record.data as Record<string, unknown> | undefined
+  if (data && typeof data.dedupeKey === 'string' && data.dedupeKey.length > 0) {
+    return data.dedupeKey
+  }
+
   const canonical = buildCanonicalIdentity(record)
   return createHash('sha256').update(canonical).digest('hex')
 }

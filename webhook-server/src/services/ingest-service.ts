@@ -6,6 +6,7 @@ import type { DedupeRepository } from '../dedupe/dedupe-repository'
 export interface IngestDeps {
   readonly isDuplicate: (key: string) => Promise<boolean>
   readonly save: (record: Readonly<Record<string, unknown>>) => Promise<void>
+  readonly update: (key: string, record: Readonly<Record<string, unknown>>) => Promise<void>
 }
 
 export interface IngestResultFailed {
@@ -24,7 +25,12 @@ export interface IngestResultInserted {
   readonly dedupeKey: string
 }
 
-export type IngestResult = IngestResultFailed | IngestResultDuplicate | IngestResultInserted
+export interface IngestResultUpdated {
+  readonly status: 'updated'
+  readonly dedupeKey: string
+}
+
+export type IngestResult = IngestResultFailed | IngestResultDuplicate | IngestResultInserted | IngestResultUpdated
 
 // Pure business logic function
 export const ingest = async (record: unknown, deps: IngestDeps): Promise<IngestResult> => {
@@ -44,6 +50,13 @@ export const ingest = async (record: unknown, deps: IngestDeps): Promise<IngestR
   // Check for duplicate (injected I/O)
   const exists = await deps.isDuplicate(dedupeKey)
   if (exists) {
+    const rec = record as Record<string, unknown>
+    const data = rec.data as Record<string, unknown> | undefined
+    if (data && data.dedupeStrategy === 'upsert') {
+      const now = new Date().toISOString()
+      await deps.update(dedupeKey, { ...rec, dedupeKey, receivedAt: now })
+      return { status: 'updated', dedupeKey }
+    }
     return { status: 'duplicate', dedupeKey }
   }
 
@@ -87,6 +100,10 @@ export const createIngestService = (serviceDeps: IngestServiceDeps): IngestServi
             enrichedRecord.dedupeKey as string,
             record as Record<string, unknown>
           )
+        },
+        update: async (key: string, enrichedRecord: Readonly<Record<string, unknown>>) => {
+          await serviceDeps.appendRecord(serviceDeps.logStorePath, enrichedRecord)
+          await serviceDeps.dedupeRepository.upsert(key, record as Record<string, unknown>)
         },
       }
 
